@@ -2,16 +2,14 @@
 Author: Joon Sung Park (joonspk@stanford.edu)
 
 File: gpt_structure.py
-Description: Wrapper functions for calling OpenAI APIs.
+Description: Wrapper functions for calling Ollama APIs.
 """
 import json
 import random
-import openai
+import requests
 import time 
 
 from utils import *
-
-openai.api_key = openai_api_key
 
 def temp_sleep(seconds=0.1):
   time.sleep(seconds)
@@ -19,11 +17,16 @@ def temp_sleep(seconds=0.1):
 def ChatGPT_single_request(prompt): 
   temp_sleep()
 
-  completion = openai.ChatCompletion.create(
-    model="gpt-3.5-turbo", 
-    messages=[{"role": "user", "content": prompt}]
+  response = requests.post(
+    'http://localhost:11434/api/generate',
+    json={
+      'model': 'llama3.1:8b',
+      'prompt': prompt,
+      'stream': False
+    }
   )
-  return completion["choices"][0]["message"]["content"]
+  response.raise_for_status()
+  return response.json()['response']
 
 
 # ============================================================================
@@ -32,7 +35,7 @@ def ChatGPT_single_request(prompt):
 
 def GPT4_request(prompt): 
   """
-  Given a prompt and a dictionary of GPT parameters, make a request to OpenAI
+  Given a prompt and a dictionary of GPT parameters, make a request to Ollama
   server and returns the response. 
   ARGS:
     prompt: a str prompt
@@ -45,11 +48,16 @@ def GPT4_request(prompt):
   temp_sleep()
 
   try: 
-    completion = openai.ChatCompletion.create(
-    model="gpt-4", 
-    messages=[{"role": "user", "content": prompt}]
+    response = requests.post(
+      'http://localhost:11434/api/generate',
+      json={
+        'model': 'llama3.1:8b',
+        'prompt': prompt,
+        'stream': False
+      }
     )
-    return completion["choices"][0]["message"]["content"]
+    response.raise_for_status()
+    return response.json()['response']
   
   except: 
     print ("ChatGPT ERROR")
@@ -58,7 +66,7 @@ def GPT4_request(prompt):
 
 def ChatGPT_request(prompt): 
   """
-  Given a prompt and a dictionary of GPT parameters, make a request to OpenAI
+  Given a prompt and a dictionary of GPT parameters, make a request to Ollama
   server and returns the response. 
   ARGS:
     prompt: a str prompt
@@ -70,11 +78,16 @@ def ChatGPT_request(prompt):
   """
   # temp_sleep()
   try: 
-    completion = openai.ChatCompletion.create(
-    model="gpt-3.5-turbo", 
-    messages=[{"role": "user", "content": prompt}]
+    response = requests.post(
+      'http://localhost:11434/api/generate',
+      json={
+        'model': 'llama3.1:8b',
+        'prompt': prompt,
+        'stream': False
+      }
     )
-    return completion["choices"][0]["message"]["content"]
+    response.raise_for_status()
+    return response.json()['response']
   
   except: 
     print ("ChatGPT ERROR")
@@ -196,7 +209,7 @@ def ChatGPT_safe_generate_response_OLD(prompt,
 
 def GPT_request(prompt, gpt_parameter): 
   """
-  Given a prompt and a dictionary of GPT parameters, make a request to OpenAI
+  Given a prompt and a dictionary of GPT parameters, make a request to Ollama
   server and returns the response. 
   ARGS:
     prompt: a str prompt
@@ -208,17 +221,23 @@ def GPT_request(prompt, gpt_parameter):
   """
   temp_sleep()
   try: 
-    response = openai.Completion.create(
-                model=gpt_parameter["engine"],
-                prompt=prompt,
-                temperature=gpt_parameter["temperature"],
-                max_tokens=gpt_parameter["max_tokens"],
-                top_p=gpt_parameter["top_p"],
-                frequency_penalty=gpt_parameter["frequency_penalty"],
-                presence_penalty=gpt_parameter["presence_penalty"],
-                stream=gpt_parameter["stream"],
-                stop=gpt_parameter["stop"],)
-    return response.choices[0].text
+    # Note: Ollama doesn't support all OpenAI parameters, using the most relevant ones
+    response = requests.post(
+      'http://localhost:11434/api/generate',
+      json={
+        'model': 'llama3.1:8b',
+        'prompt': prompt,
+        'stream': False,
+        'options': {
+          'temperature': gpt_parameter.get("temperature", 0.7),
+          'num_predict': gpt_parameter.get("max_tokens", 50),
+          'top_p': gpt_parameter.get("top_p", 1),
+          'stop': gpt_parameter.get("stop", [])
+        }
+      }
+    )
+    response.raise_for_status()
+    return response.json()['response']
   except: 
     print ("TOKEN LIMIT EXCEEDED")
     return "TOKEN LIMIT EXCEEDED"
@@ -273,16 +292,28 @@ def safe_generate_response(prompt,
   return fail_safe_response
 
 
-def get_embedding(text, model="text-embedding-ada-002"):
+def get_embedding(text, model="llama3.1:8b"):
+  """
+  Get text embeddings using Ollama's embedding endpoint.
+  Note: Ollama uses a different endpoint for embeddings.
+  """
   text = text.replace("\n", " ")
   if not text: 
     text = "this is blank"
-  return openai.Embedding.create(
-          input=[text], model=model)['data'][0]['embedding']
+  
+  response = requests.post(
+    'http://localhost:11434/api/embeddings',
+    json={
+      'model': model,
+      'prompt': text
+    }
+  )
+  response.raise_for_status()
+  return response.json()['embedding']
 
 
 if __name__ == '__main__':
-  gpt_parameter = {"engine": "text-davinci-003", "max_tokens": 50, 
+  gpt_parameter = {"engine": "llama3.1:8b", "max_tokens": 50, 
                    "temperature": 0, "top_p": 1, "stream": False,
                    "frequency_penalty": 0, "presence_penalty": 0, 
                    "stop": ['"']}
@@ -309,23 +340,3 @@ if __name__ == '__main__':
                                  True)
 
   print (output)
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-

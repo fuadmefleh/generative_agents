@@ -14,7 +14,8 @@ from django.shortcuts import render, redirect, HttpResponseRedirect
 from django.http import HttpResponse, JsonResponse
 from global_methods import *
 
-from django.contrib.staticfiles.templatetags.staticfiles import static
+# Remove this line if not using static in your views
+# from django.templatetags.static import static
 from .models import *
 
 def landing(request): 
@@ -117,7 +118,7 @@ def home(request):
   with open(f_curr_step) as json_file:  
     step = json.load(json_file)["step"]
 
-  os.remove(f_curr_step)
+  #os.remove(f_curr_step)
 
   persona_names = []
   persona_names_set = set()
@@ -206,15 +207,24 @@ def replay_persona_state(request, sim_code, step, persona_name):
   a_mem_chat = []
   a_mem_thought = []
 
+  print( memory )
+
   for count in range(len(associative.keys()), 0, -1): 
     node_id = f"node_{str(count)}"
     node_details = associative[node_id]
+    print( f"Processing node_id: {node_id}")  # Debug statement
+    print( f"Node details: {node_details}")  # Debug statement
+
+    # Add node_count to the details for display
+    node_details['node_count'] = count
 
     if node_details["type"] == "event":
       a_mem_event += [node_details]
 
     elif node_details["type"] == "chat":
-      a_mem_chat += [node_details]
+      # Ensure filling is properly formatted as a list of tuples
+      if "filling" in node_details and isinstance(node_details["filling"], list):
+        a_mem_chat += [node_details]
 
     elif node_details["type"] == "thought":
       a_mem_thought += [node_details]
@@ -229,6 +239,17 @@ def replay_persona_state(request, sim_code, step, persona_name):
              "a_mem_chat": a_mem_chat,
              "a_mem_thought": a_mem_thought}
   template = "persona_state/persona_state.html"
+
+  # DEBUG: Print to console to see what we have
+  print(f"DEBUG: a_mem_event count: {len(a_mem_event)}")
+  print(f"DEBUG: a_mem_chat count: {len(a_mem_chat)}")
+  print(f"DEBUG: a_mem_thought count: {len(a_mem_thought)}")
+  
+  if a_mem_chat:
+    print(f"DEBUG: First chat node: {a_mem_chat[0]}")
+  if a_mem_thought:
+    print(f"DEBUG: First thought node: {a_mem_thought[0]}")
+
   return render(request, template, context)
 
 

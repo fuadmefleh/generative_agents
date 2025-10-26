@@ -17,10 +17,16 @@ def generate_poig_score(persona, event_type, description):
     return 1
 
   if event_type == "event": 
-    return run_gpt_prompt_event_poignancy(persona, description)[0]
+    result = run_gpt_prompt_event_poignancy(persona, description)
+    if result and len(result) > 0:
+        return result[0]
+    return 5  # Default poignancy score
   elif event_type == "chat": 
-    return run_gpt_prompt_chat_poignancy(persona, 
-                           persona.scratch.act_description)[0]
+    result = run_gpt_prompt_chat_poignancy(persona, 
+                           persona.scratch.act_description)
+    if result and len(result) > 0:
+        return result[0]
+    return 5  # Default poignancy score
 
 def perceive(persona, maze): 
   """
@@ -102,6 +108,10 @@ def perceive(persona, maze):
   for dist, event in percept_events_list[:persona.scratch.att_bandwidth]: 
     perceived_events += [event]
 
+
+  print( f"[Perceive] Persona {persona.name} perceived {len(perceived_events)} events." )
+  print( f"[Perceive] Events: {perceived_events}" )
+  
   # Storing events. 
   # <ret_events> is a list of <ConceptNode> instances from the persona's 
   # associative memory. 

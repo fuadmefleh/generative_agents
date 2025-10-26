@@ -277,6 +277,8 @@ def run_gpt_prompt_generate_hourly_schedule(persona,
                                      test_input)
   prompt = generate_prompt(prompt_input, prompt_template)
   fail_safe = get_fail_safe()
+
+  prompt = "Your task is to finish the sentence for the latest time provided. You provide no other text except for finishing the sentence.\n\n" + prompt
   
   output = safe_generate_response(prompt, gpt_param, 5, fail_safe,
                                    __func_validate, __func_clean_up)
@@ -357,61 +359,53 @@ def run_gpt_prompt_task_decomp(persona,
     return prompt_input
 
   def __func_clean_up(gpt_response, prompt=""):
-    print ("TOODOOOOOO")
-    print (gpt_response)
-    print ("-==- -==- -==- ")
-
-    # TODO SOMETHING HERE sometimes fails... See screenshot
-    temp = [i.strip() for i in gpt_response.split("\n")]
-    _cr = []
-    cr = []
-    for count, i in enumerate(temp): 
-      if count != 0: 
-        _cr += [" ".join([j.strip () for j in i.split(" ")][3:])]
-      else: 
-        _cr += [i]
-    for count, i in enumerate(_cr): 
-      k = [j.strip() for j in i.split("(duration in minutes:")]
-      task = k[0]
-      if task[-1] == ".": 
-        task = task[:-1]
-      duration = int(k[1].split(",")[0].strip())
-      cr += [[task, duration]]
-
-    total_expected_min = int(prompt.split("(total duration in minutes")[-1]
-                                   .split("):")[0].strip())
+    import re
     
-    # TODO -- now, you need to make sure that this is the same as the sum of 
-    #         the current action sequence. 
-    curr_min_slot = [["dummy", -1],] # (task_name, task_index)
-    for count, i in enumerate(cr): 
-      i_task = i[0] 
-      i_duration = i[1]
-
-      i_duration -= (i_duration % 5)
-      if i_duration > 0: 
-        for j in range(i_duration): 
-          curr_min_slot += [(i_task, count)]       
-    curr_min_slot = curr_min_slot[1:]   
-
-    if len(curr_min_slot) > total_expected_min: 
-      last_task = curr_min_slot[60]
-      for i in range(1, 6): 
-        curr_min_slot[-1 * i] = last_task
-    elif len(curr_min_slot) < total_expected_min: 
-      last_task = curr_min_slot[-1]
-      for i in range(total_expected_min - len(curr_min_slot)):
-        curr_min_slot += [last_task]
-
-    cr_ret = [["dummy", -1],]
-    for task, task_index in curr_min_slot: 
-      if task != cr_ret[-1][0]: 
-        cr_ret += [[task, 1]]
-      else: 
-        cr_ret[-1][1] += 1
-    cr = cr_ret[1:]
-
-    return cr
+    cr = gpt_response.strip()
+    ret = []
+    
+    # Split by newlines
+    for k in cr.split("\n"):
+        k = k.strip()
+        if not k:
+            continue
+            
+        # Remove list markers (1., 2., -, *, etc)
+        k = re.sub(r'^\s*[-•*]\s*', '', k)
+        k = re.sub(r'^\s*\d+[.)]\s*', '', k)
+        
+        # Try to split by comma first
+        if ',' in k:
+            parts = k.split(',')
+            if len(parts) >= 2:
+                task = parts[0].strip()
+                # Extract number from the duration part
+                duration_str = parts[-1].strip()
+                duration_match = re.search(r'(\d+)', duration_str)
+                if duration_match:
+                    ret.append([task, int(duration_match.group(1))])
+                    continue
+        
+        # Try parentheses format: "task (duration)"
+        match = re.match(r'^(.+?)\s*\((\d+)[^)]*\)', k)
+        if match:
+            ret.append([match.group(1).strip(), int(match.group(2))])
+            continue
+            
+        # Try colon format: "task: duration"
+        match = re.match(r'^(.+?):\s*(\d+)', k)
+        if match:
+            ret.append([match.group(1).strip(), int(match.group(2))])
+            continue
+    
+    # If parsing failed, return a simple fallback
+    if not ret:
+        if duration <= 10:
+            ret = [[task, duration]]
+        else:
+            ret = [[task, duration - 5], ["finishing up", 5]]
+    
+    return ret
 
   def __func_validate(gpt_response, prompt=""): 
     # TODO -- this sometimes generates error 
@@ -878,19 +872,25 @@ def run_gpt_prompt_event_triple(action_description, persona, verbose=False):
     if "(" in action_description: 
       action_description = action_description.split("(")[-1].split(")")[0]
     prompt_input = [persona.name, 
-                    action_description,
-                    persona.name]
+                    "is",
+                    action_description]
     return prompt_input
   
   def __func_clean_up(gpt_response, prompt=""):
     cr = gpt_response.strip()
-    cr = [i.strip() for i in cr.split(")")[0].split(",")]
+    print( "DEBUG cr before", cr)
+    
+    cr = cr.strip()
+    cr.replace("(", "")
+    cr.replace(")", "")
+    cr = [i.strip() for i in cr.split(",")]
+    #cr = [i.strip() for i in cr.split(")")[0].split(",")]
     return cr
 
   def __func_validate(gpt_response, prompt=""): 
     try: 
       gpt_response = __func_clean_up(gpt_response, prompt="")
-      if len(gpt_response) != 2: 
+      if len(gpt_response) != 3: 
         return False
     except: return False
     return True 
@@ -939,6 +939,7 @@ def run_gpt_prompt_event_triple(action_description, persona, verbose=False):
   prompt_template = "persona/prompt_template/v2/generate_event_triple_v1.txt"
   prompt_input = create_prompt_input(action_description, persona)
   prompt = generate_prompt(prompt_input, prompt_template)
+
   fail_safe = get_fail_safe(persona) ########
   output = safe_generate_response(prompt, gpt_param, 5, fail_safe,
                                    __func_validate, __func_clean_up)
@@ -1890,6 +1891,11 @@ def run_gpt_prompt_event_poignancy(persona, event_description, test_input=None, 
   fail_safe = get_fail_safe() ########
   output = ChatGPT_safe_generate_response(prompt, example_output, special_instruction, 3, fail_safe,
                                           __chat_func_validate, __chat_func_clean_up, True)
+  
+  if debug or verbose: 
+    print_run_prompts(prompt_template, persona, gpt_param, 
+                      prompt_input, prompt, output)
+    
   if output != False: 
     return output, [output, prompt, gpt_param, prompt_input, fail_safe]
   # ChatGPT Plugin ===========================================================

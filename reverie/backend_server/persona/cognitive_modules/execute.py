@@ -79,7 +79,7 @@ def execute(persona, maze, personas, plan):
     elif "<random>" in plan: 
       # Executing a random location action.
       plan = ":".join(plan.split(":")[:-1])
-      target_tiles = maze.address_tiles[plan]
+      target_tiles = maze.address_tiles.get(plan, maze.address_tiles["the Ville:Johnson Park"])
       target_tiles = random.sample(list(target_tiles), 1)
 
     else: 
@@ -88,11 +88,15 @@ def execute(persona, maze, personas, plan):
       # Retrieve the target addresses. Again, plan is an action address in its
       # string form. <maze.address_tiles> takes this and returns candidate 
       # coordinates. 
-      if plan not in maze.address_tiles: 
-        maze.address_tiles["Johnson Park:park:park garden"] #ERRORRRRRRR
+      
+      # Strip <random> suffix if present (it should have been handled above, but just in case)
+      clean_plan = plan.replace(":<random>", "")
+      
+      if clean_plan not in maze.address_tiles: 
+        target_tiles = maze.address_tiles["Johnson Park:park:park garden"] #ERRORRRRRRR
       else: 
-        target_tiles = maze.address_tiles[plan]
-
+        target_tiles = maze.address_tiles[clean_plan]
+        
     # There are sometimes more than one tile returned from this (e.g., a tabe
     # may stretch many coordinates). So, we sample a few here. And from that 
     # random sample, we will take the closest ones. 

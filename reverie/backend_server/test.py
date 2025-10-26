@@ -2,19 +2,18 @@
 Author: Joon Sung Park (joonspk@stanford.edu)
 
 File: gpt_structure.py
-Description: Wrapper functions for calling OpenAI APIs.
+Description: Wrapper functions for calling Ollama APIs.
 """
 import json
 import random
-import openai
+import requests
 import time 
 
 from utils import *
-openai.api_key = openai_api_key
 
 def ChatGPT_request(prompt): 
   """
-  Given a prompt and a dictionary of GPT parameters, make a request to OpenAI
+  Given a prompt and a dictionary of GPT parameters, make a request to Ollama
   server and returns the response. 
   ARGS:
     prompt: a str prompt
@@ -26,11 +25,16 @@ def ChatGPT_request(prompt):
   """
   # temp_sleep()
   try: 
-    completion = openai.ChatCompletion.create(
-    model="gpt-3.5-turbo", 
-    messages=[{"role": "user", "content": prompt}]
+    response = requests.post(
+        'http://localhost:11434/api/generate',
+        json={
+            'model': 'llama3.1:8b',
+            'prompt': prompt,
+            'stream': False
+        }
     )
-    return completion["choices"][0]["message"]["content"]
+    response.raise_for_status()
+    return response.json()['response']
   
   except: 
     print ("ChatGPT ERROR")
@@ -62,15 +66,3 @@ Example output json:
 """
 
 print (ChatGPT_request(prompt))
-
-
-
-
-
-
-
-
-
-
-
-

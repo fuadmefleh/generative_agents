@@ -1,4 +1,4 @@
-{% load staticfiles %}
+{% load static %}
 
 <div id="step" style="display:none">{{step}}</div>
 <div id="sim_code" style="display:none">{{sim_code}}</div>
@@ -43,25 +43,10 @@
 
 	// Phaser 3.0 global settings. 
 	// Configuration meant to be passed to the main Phaser game instance. 
-	const config = {
-	  type: Phaser.AUTO,
-	  width: 1500,
-	  height: 800,
-	  parent: "game-container",
-	  pixelArt: true,
-	  physics: {
-	    default: "arcade",
-	    arcade: {
-	      gravity: { y: 0 } } },
-	  scene: {
-	    preload: preload,
-	    create: create,
-	    update: update } };
-
 	// const config = {
 	//   type: Phaser.AUTO,
-	//   width: 4480,
-	//   height: 3200,
+	//   width: 2400,
+	//   height: 1400,
 	//   parent: "game-container",
 	//   pixelArt: true,
 	//   physics: {
@@ -71,14 +56,32 @@
 	//   scene: {
 	//     preload: preload,
 	//     create: create,
-	//     update: update },
-	//   scale: {zoom: 0.5} };
+	//     update: update } };
+
+	const config = {
+	  type: Phaser.AUTO,
+	  width: 4480,
+	  height: 3200,
+	  parent: "game-container",
+	  pixelArt: true,
+	  physics: {
+	    default: "arcade",
+	    arcade: {
+	      gravity: { y: 0 } } },
+	  scene: {
+	    preload: preload,
+	    create: create,
+	    update: update },
+	  scale: {zoom: 0.5} };
 
 	// Creating the game instance and setting up the main Phaser variables that  
 	// will be used in it. 
 	const game = new Phaser.Game(config);
 	let cursors;
 	let player;
+	let isDragging = false;
+let dragStartX = 0;
+let dragStartY = 0;
 	let showDebug = false;
 
 	// Persona related variables. This should have the name of the persona as its 
@@ -326,6 +329,40 @@
 	    frames: anims.generateFrameNames("atlas", { prefix: "misa-back-walk.", start: 0, end: 3, zeroPad: 3 }),
 	    frameRate: 4,
 	    repeat: -1 });
+
+		// Scroll wheel zoom control
+		this.input.on('wheel', function (pointer, gameObjects, deltaX, deltaY, deltaZ) {
+			const camera = this.cameras.main;
+			const zoomSpeed = 0.001;
+			const minZoom = 0.3;
+			const maxZoom = 2.5;
+			let newZoom = camera.zoom - deltaY * zoomSpeed;
+			camera.setZoom(Math.max(minZoom, Math.min(maxZoom, newZoom)));
+		});
+
+		// Left click and drag to pan
+  this.input.on('pointerdown', function (pointer) {
+    if (pointer.leftButtonDown()) {
+      isDragging = true;
+      dragStartX = pointer.x;
+      dragStartY = pointer.y;
+    }
+  });
+
+  this.input.on('pointermove', function (pointer) {
+    if (isDragging) {
+      const deltaX = pointer.x - dragStartX;
+      const deltaY = pointer.y - dragStartY;
+      player.x -= deltaX / camera.zoom;
+      player.y -= deltaY / camera.zoom;
+      dragStartX = pointer.x;
+      dragStartY = pointer.y;
+    }
+  });
+
+  this.input.on('pointerup', function (pointer) {
+    isDragging = false;
+  });
 	}
 
 
