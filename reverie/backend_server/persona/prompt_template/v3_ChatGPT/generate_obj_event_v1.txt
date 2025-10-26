@@ -8,9 +8,30 @@ Variables:
 !<INPUT 4>! -- Object name 
 
 <commentblockmarker>###</commentblockmarker>
-Task: We want to understand the state of an object that is being used by someone. 
+Task: Describe the current state of an object being used by someone. Respond with ONLY the state description, completing the sentence that starts with the object name.
 
-Let's think step by step. 
-We want to know about !<INPUT 0>!'s state. 
-Step 1. !<INPUT 1>! is at/using the !<INPUT 2>!.
-Step 2. Describe the !<INPUT 3>!'s state: !<INPUT 4>! is
+Examples:
+Object: oven
+Sam Johnson is eating breakfast.
+Output: oven is being heated to cook breakfast
+---
+Object: computer
+Michael Bernstein is writing email.
+Output: computer is being used to write email
+---
+Object: sink
+Tom Kane is washing his face.
+Output: sink is running with water
+---
+Object: stove
+Jennifer Moore is cooking dinner.
+Output: stove is turned on with pots on the burners
+---
+Object: bed
+Isabella Rodriguez is sleeping.
+Output: bed is occupied, supporting someone sleeping
+---
+
+Object: !<INPUT 0>!
+!<INPUT 1>! !<INPUT 2>!.
+Output: !<INPUT 4>! is

@@ -362,40 +362,40 @@ def run_gpt_prompt_task_decomp(persona,
     import re
     
     cr = gpt_response.strip()
+    print("DEBUG cr before", cr)
     ret = []
     
     # Split by newlines
-    for k in cr.split("\n"):
-        k = k.strip()
-        if not k:
+    for line in cr.split("\n"):
+        line = line.strip()
+        if not line:
             continue
-            
-        # Remove list markers (1., 2., -, *, etc)
-        k = re.sub(r'^\s*[-•*]\s*', '', k)
-        k = re.sub(r'^\s*\d+[.)]\s*', '', k)
         
-        # Try to split by comma first
-        if ',' in k:
-            parts = k.split(',')
-            if len(parts) >= 2:
-                task = parts[0].strip()
-                # Extract number from the duration part
-                duration_str = parts[-1].strip()
-                duration_match = re.search(r'(\d+)', duration_str)
-                if duration_match:
-                    ret.append([task, int(duration_match.group(1))])
-                    continue
-        
-        # Try parentheses format: "task (duration)"
-        match = re.match(r'^(.+?)\s*\((\d+)[^)]*\)', k)
-        if match:
-            ret.append([match.group(1).strip(), int(match.group(2))])
+        # Skip header lines (like "Here are the subtasks for...")
+        if not line[0].isdigit():
             continue
-            
-        # Try colon format: "task: duration"
-        match = re.match(r'^(.+?):\s*(\d+)', k)
+        
+        # Match the format: "N) Name is doing something. (duration in minutes: X, minutes left: Y)"
+        # We want to extract the task description and the duration
+        match = re.match(r'^\d+\)\s*(.+?)\s*\(duration in minutes:\s*(\d+),\s*minutes left:\s*\d+\)', line)
+        
         if match:
-            ret.append([match.group(1).strip(), int(match.group(2))])
+            task_desc = match.group(1).strip()
+            duration = int(match.group(2))
+            ret.append([task_desc, duration])
+            continue
+        
+        # Fallback: try simpler formats in case the output varies
+        # Remove list number
+        line = re.sub(r'^\s*\d+[.)]\s*', '', line)
+        
+        # Try to find duration in parentheses
+        duration_match = re.search(r'\(duration in minutes:\s*(\d+)', line)
+        if duration_match:
+            duration = int(duration_match.group(1))
+            # Extract task (everything before the parentheses)
+            task = re.sub(r'\s*\(duration in minutes:.*', '', line).strip()
+            ret.append([task, duration])
             continue
     
     # If parsing failed, return a simple fallback
@@ -404,6 +404,8 @@ def run_gpt_prompt_task_decomp(persona,
             ret = [[task, duration]]
         else:
             ret = [[task, duration - 5], ["finishing up", 5]]
+    
+    print("DEBUG cr after", ret)
     
     return ret
 
@@ -880,18 +882,27 @@ def run_gpt_prompt_event_triple(action_description, persona, verbose=False):
     cr = gpt_response.strip()
     print( "DEBUG cr before", cr)
     
-    cr = cr.strip()
-    cr.replace("(", "")
-    cr.replace(")", "")
+    # cr = cr.strip()
+    cr = cr.replace("(", "")
+    cr = cr.replace(")", "")
     cr = [i.strip() for i in cr.split(",")]
+
+    print( "DEBUG cr after", cr)
     #cr = [i.strip() for i in cr.split(")")[0].split(",")]
     return cr
 
   def __func_validate(gpt_response, prompt=""): 
     try: 
       gpt_response = __func_clean_up(gpt_response, prompt="")
+      print( "DEBUG gpt_response after clean", gpt_response)
+      print( "is a  tuple?" )
+      print( isinstance(gpt_response, tuple) )
+
+      print( len(gpt_response) )
+      # Esnure the tuple has three elements
       if len(gpt_response) != 3: 
         return False
+      
     except: return False
     return True 
 
@@ -943,7 +954,7 @@ def run_gpt_prompt_event_triple(action_description, persona, verbose=False):
   fail_safe = get_fail_safe(persona) ########
   output = safe_generate_response(prompt, gpt_param, 5, fail_safe,
                                    __func_validate, __func_clean_up)
-  output = (persona.name, output[0], output[1])
+  output = (persona.name, output[1], output[2])
 
   if debug or verbose: 
     print_run_prompts(prompt_template, persona, gpt_param, 
@@ -1052,13 +1063,17 @@ def run_gpt_prompt_act_obj_event_triple(act_game_object, act_obj_desc, persona, 
   
   def __func_clean_up(gpt_response, prompt=""):
     cr = gpt_response.strip()
-    cr = [i.strip() for i in cr.split(")")[0].split(",")]
+    cr = cr.replace("(", "")
+    cr = cr.replace(")", "")
+    cr = [i.strip() for i in cr.split(",")]
     return cr
 
   def __func_validate(gpt_response, prompt=""): 
     try: 
       gpt_response = __func_clean_up(gpt_response, prompt="")
-      if len(gpt_response) != 2: 
+      if len(gpt_response) != 3: 
+        print( "DEBUG failed length check" )
+        print( gpt_response )
         return False
     except: return False
     return True 
@@ -1076,7 +1091,7 @@ def run_gpt_prompt_act_obj_event_triple(act_game_object, act_obj_desc, persona, 
   fail_safe = get_fail_safe(act_game_object)
   output = safe_generate_response(prompt, gpt_param, 5, fail_safe,
                                    __func_validate, __func_clean_up)
-  output = (act_game_object, output[0], output[1])
+  output = ( output[0], output[1], output[2] )
 
   if debug or verbose: 
     print_run_prompts(prompt_template, persona, gpt_param, 
