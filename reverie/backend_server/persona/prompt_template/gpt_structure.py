@@ -6,8 +6,13 @@ Description: Wrapper functions for calling Ollama APIs.
 """
 import json
 import random
+import time
+from typing import Optional, List, Dict, Any, Literal
+from enum import Enum
 import requests
-import time 
+from pydantic import BaseModel, Field, validator, ValidationError
+
+
 
 from utils import *
 
@@ -206,6 +211,159 @@ def ChatGPT_safe_generate_response_OLD(prompt,
 # ============================================================================
 # ###################[SECTION 2: ORIGINAL GPT-3 STRUCTURE] ###################
 # ============================================================================
+
+def GPT_request_structured(
+    prompt: str, 
+    gpt_parameters,
+    response_model: Optional[BaseModel] = None
+) -> Dict[str, Any]:
+    """
+    Make a structured request to Ollama with optional Pydantic model validation.
+    
+    Args:
+        prompt: The prompt string
+        gpt_parameters: GPTParameters model with request parameters
+        response_model: Optional Pydantic model class for structured output
+    
+    Returns:
+        Dictionary containing response and optional structured data
+    """
+    temp_sleep()
+    
+    try:
+        # Build request payload
+        payload = {
+            'model': gpt_parameters["model"],
+            'prompt': prompt,
+            'stream': False,
+            'options': {
+                'temperature': gpt_parameters["temperature"],
+                'num_predict': gpt_parameters["max_tokens"],
+                'top_p': gpt_parameters["top_p"],
+            }
+        }
+        
+        # Add stop tokens if provided
+        if gpt_parameters["stop"]:
+            payload['options']['stop'] = gpt_parameters["stop"]
+
+        # Add format instruction if using structured output
+        if response_model:
+            # Add JSON schema instruction to prompt
+            schema = response_model.schema()
+            structured_prompt = f"""{prompt}
+
+Respond with valid JSON matching this schema:
+{json.dumps(schema, indent=2)}
+
+JSON Response:"""
+            
+            print( "STRUCTURED PROMPT:::: ", structured_prompt)
+            payload['prompt'] = structured_prompt
+            payload['format'] = 'json'
+        
+        # Make request
+        response = requests.post(
+            'http://localhost:11434/api/generate',
+            json=payload,
+            timeout=30
+        )
+        response.raise_for_status()
+        
+        result = response.json()
+        raw_response = result.get('response', '')
+        
+        # Parse structured output if model provided
+        if response_model:
+            try:
+                # Try to parse JSON from response
+                json_str = raw_response.strip()
+                if json_str.startswith('```json'):
+                    json_str = json_str[7:]
+                if json_str.endswith('```'):
+                    json_str = json_str[:-3]
+                
+                json_data = json.loads(json_str)
+                structured_data = response_model(**json_data)
+                
+                return {
+                    'success': True,
+                    'raw_response': raw_response,
+                    'structured_data': structured_data,
+                    'data': structured_data.dict()
+                }
+            except (json.JSONDecodeError, ValidationError) as e:
+                return {
+                    'success': False,
+                    'raw_response': raw_response,
+                    'error': str(e),
+                    'structured_data': None
+                }
+        
+        return {
+            'success': True,
+            'raw_response': raw_response,
+            'structured_data': None
+        }
+        
+    except requests.exceptions.RequestException as e:
+        return {
+            'success': False,
+            'raw_response': None,
+            'error': f"Request failed: {str(e)}",
+            'structured_data': None
+        }
+    except Exception as e:
+        return {
+            'success': False,
+            'raw_response': None,
+            'error': f"Unexpected error: {str(e)}",
+            'structured_data': None
+        }
+
+
+def safe_generate_structured_response(
+    prompt: str,
+    gpt_parameters,
+    response_model: BaseModel,
+    repeat: int = 5,
+    fail_safe_response: Any = None,
+    verbose: bool = False
+) -> Any:
+    """
+    Safely generate a structured response with retries.
+    
+    Args:
+        prompt: The prompt string
+        gpt_parameters: GPTParameters model
+        response_model: Pydantic model for response validation
+        repeat: Number of retry attempts
+        fail_safe_response: Default response if all attempts fail
+        verbose: Print debug information
+    
+    Returns:
+        Structured response or fail-safe value
+    """
+    if verbose:
+        print(f"Prompt: {prompt[:200]}...")
+    
+    for i in range(repeat):
+        result = GPT_request_structured(prompt, gpt_parameters, response_model)
+        
+        if result['success'] and result['structured_data']:
+            if verbose:
+                print(f"Success on attempt {i+1}")
+            return result['structured_data']
+        
+        if verbose:
+            print(f"Attempt {i+1} failed: {result.get('error', 'Unknown error')}")
+            if result.get('raw_response'):
+                print(f"Raw response: {result['raw_response']}")
+    
+    if verbose:
+        print(f"All attempts failed, returning fail-safe: {fail_safe_response}")
+    
+    return fail_safe_response
 
 def GPT_request(prompt, gpt_parameter): 
   """

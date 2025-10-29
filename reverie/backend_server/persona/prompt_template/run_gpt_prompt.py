@@ -9,6 +9,9 @@ import re
 import datetime
 import sys
 import ast
+from typing import Optional, List, Dict, Any, Literal
+from enum import Enum
+from pydantic import BaseModel, Field, validator, ValidationError
 
 sys.path.append('../../')
 
@@ -542,12 +545,6 @@ def run_gpt_prompt_action_sector(action_description,
     prompt_input += [persona.scratch.get_str_name()]
     return prompt_input
 
-
-    
-
-    
-
-
   def __func_clean_up(gpt_response, prompt=""):
     cleaned_response = gpt_response.split("}")[0]
     return cleaned_response
@@ -564,41 +561,26 @@ def run_gpt_prompt_action_sector(action_description,
   def get_fail_safe(): 
     fs = ("kitchen")
     return fs
+  
+  class AreaSelection(BaseModel):
+    """Structured output for area selection task"""
+    selected_area: str = Field(
+        ..., 
+        description="The selected area from available options"
+    )
+    reasoning: Optional[str] = Field(
+        None,
+        description="Brief reasoning for the selection"
+    )
+    
+    @validator('selected_area')
+    def validate_area(cls, v):
+        # Remove curly braces if present
+        if v.startswith('{') and v.endswith('}'):
+            v = v[1:-1]
+        return v.strip()
 
-
-  # # ChatGPT Plugin ===========================================================
-  # def __chat_func_clean_up(gpt_response, prompt=""): ############
-  #   cr = gpt_response.strip()
-  #   return cr
-
-  # def __chat_func_validate(gpt_response, prompt=""): ############
-  #   try: 
-  #     gpt_response = __func_clean_up(gpt_response, prompt="")
-  #   except: 
-  #     return False
-  #   return True 
-
-  # print ("asdhfapsh8p9hfaiafdsi;ldfj as DEBUG 20") ########
-  # gpt_param = {"engine": "text-davinci-002", "max_tokens": 15, 
-  #              "temperature": 0, "top_p": 1, "stream": False,
-  #              "frequency_penalty": 0, "presence_penalty": 0, "stop": None}
-  # prompt_template = "persona/prompt_template/v3_ChatGPT/action_location_sector_v2.txt" ########
-  # prompt_input = create_prompt_input(action_description, persona, maze)  ########
-  # prompt = generate_prompt(prompt_input, prompt_template)
-  # example_output = "Johnson Park" ########
-  # special_instruction = "The value for the output must contain one of the area options above verbatim (including lower/upper case)." ########
-  # fail_safe = get_fail_safe() ########
-  # output = ChatGPT_safe_generate_response(prompt, example_output, special_instruction, 3, fail_safe,
-  #                                         __chat_func_validate, __chat_func_clean_up, True)
-  # if output != False: 
-  #   return output, [output, prompt, gpt_param, prompt_input, fail_safe]
-  # # ChatGPT Plugin ===========================================================
-
-
-
-
-
-  gpt_param = {"engine": "text-davinci-002", "max_tokens": 15, 
+  gpt_param = {"model": "llama3.1:8b", "max_tokens": 500, 
                "temperature": 0, "top_p": 1, "stream": False,
                "frequency_penalty": 0, "presence_penalty": 0, "stop": None}
   prompt_template = "persona/prompt_template/v1/action_location_sector_v1.txt"
@@ -606,12 +588,27 @@ def run_gpt_prompt_action_sector(action_description,
   prompt = generate_prompt(prompt_input, prompt_template)
 
   fail_safe = get_fail_safe()
-  output = safe_generate_response(prompt, gpt_param, 5, fail_safe,
-                                   __func_validate, __func_clean_up)
+
+  output = safe_generate_structured_response(
+      prompt=prompt,
+      gpt_parameters=gpt_param,
+      response_model=AreaSelection,
+      repeat=5,
+      fail_safe_response=fail_safe,
+      verbose=True
+  )
+
+  print ("OUTPUT", output)
+
+  output = output.selected_area
+
+  # output = safe_generate_response(prompt, gpt_param, 5, fail_safe,
+  #                                  __func_validate, __func_clean_up)
   y = f"{maze.access_tile(persona.scratch.curr_tile)['world']}"
   x = [i.strip() for i in persona.s_mem.get_str_accessible_sectors(y).split(",")]
   if output not in x: 
     # output = random.choice(x)
+    print( "WARNING: OUTPUT from GPT not in accessible sectors, using random choice instead." )
     output = persona.scratch.living_area.split(":")[1]
 
   print ("DEBUG", random.choice(x), "------", output)
@@ -695,7 +692,7 @@ def run_gpt_prompt_action_arena(action_description,
     fs = ("kitchen")
     return fs
 
-  gpt_param = {"engine": "text-davinci-003", "max_tokens": 15, 
+  gpt_param = {"model": "llama3.1:8b", "max_tokens": 500, 
                "temperature": 0, "top_p": 1, "stream": False,
                "frequency_penalty": 0, "presence_penalty": 0, "stop": None}
   prompt_template = "persona/prompt_template/v1/action_location_object_vMar11.txt"
@@ -703,9 +700,39 @@ def run_gpt_prompt_action_arena(action_description,
   prompt = generate_prompt(prompt_input, prompt_template)
 
   fail_safe = get_fail_safe()
-  output = safe_generate_response(prompt, gpt_param, 5, fail_safe,
-                                   __func_validate, __func_clean_up)
+  
+  class AreaSelection(BaseModel):
+    """Structured output for area selection task"""
+    selected_area: str = Field(
+        ..., 
+        description="The selected area from available options"
+    )
+    reasoning: Optional[str] = Field(
+        None,
+        description="Brief reasoning for the selection"
+    )
+    
+    @validator('selected_area')
+    def validate_area(cls, v):
+        # Remove curly braces if present
+        if v.startswith('{') and v.endswith('}'):
+            v = v[1:-1]
+        return v.strip()
+    
+
+  output = safe_generate_structured_response(
+      prompt=prompt,
+      gpt_parameters=gpt_param,
+      response_model=AreaSelection,
+      repeat=5,
+      fail_safe_response=fail_safe,
+      verbose=True
+  )
+
   print (output)
+
+  output = output.selected_area
+
   # y = f"{act_world}:{act_sector}"
   # x = [i.strip() for i in persona.s_mem.get_str_accessible_sector_arenas(y).split(",")]
   # if output not in x: 
@@ -750,8 +777,26 @@ def run_gpt_prompt_action_game_object(action_description,
   def get_fail_safe(): 
     fs = ("bed")
     return fs
+  
+  class ObjectSelection(BaseModel):
+    """Structured output for object selection task"""
+    selected_object: str = Field(
+        ..., 
+        description="The selected object from available options"
+    )
+    reasoning: Optional[str] = Field(
+        None,
+        description="Brief reasoning for the selection"
+    )
 
-  gpt_param = {"engine": "text-davinci-003", "max_tokens": 15, 
+    @validator('selected_object')
+    def validate_object(cls, v):
+        # Remove curly braces if present
+        if v.startswith('{') and v.endswith('}'):
+            v = v[1:-1]
+        return v.strip()
+
+  gpt_param = {"model": "llama3.1:8b", "max_tokens": 500, 
                "temperature": 0, "top_p": 1, "stream": False,
                "frequency_penalty": 0, "presence_penalty": 0, "stop": None}
   prompt_template = "persona/prompt_template/v1/action_object_v2.txt"
@@ -762,8 +807,18 @@ def run_gpt_prompt_action_game_object(action_description,
   prompt = generate_prompt(prompt_input, prompt_template)
 
   fail_safe = get_fail_safe()
-  output = safe_generate_response(prompt, gpt_param, 5, fail_safe,
-                                   __func_validate, __func_clean_up)
+  
+  output = safe_generate_structured_response(
+      prompt=prompt,
+      gpt_parameters=gpt_param,
+      response_model=ObjectSelection,
+      repeat=5,
+      fail_safe_response=fail_safe,
+      verbose=True
+  )
+
+  output = output.selected_object
+
 
   x = [i.strip() for i in persona.s_mem.get_str_accessible_arena_game_objects(temp_address).split(",")]
   if output not in x: 
@@ -820,8 +875,19 @@ def run_gpt_prompt_pronunciatio(action_description, persona, verbose=False):
     return True 
     return True
 
+  class PronunciationSelection(BaseModel):
+    """Structured output for pronunciation selection task"""
+    selected_pronunciation: str = Field(
+        ..., 
+        description="The selected pronunciation from available options"
+    )
+    reasoning: Optional[str] = Field(
+        None,
+        description="Brief reasoning for the selection"
+    )
+
   print ("asdhfapsh8p9hfaiafdsi;ldfj as DEBUG 4") ########
-  gpt_param = {"engine": "text-davinci-002", "max_tokens": 15, 
+  gpt_param = {"model": "llama3.1:8b", "max_tokens": 500, 
                "temperature": 0, "top_p": 1, "stream": False,
                "frequency_penalty": 0, "presence_penalty": 0, "stop": None}
   prompt_template = "persona/prompt_template/v3_ChatGPT/generate_pronunciatio_v1.txt" ########
@@ -830,8 +896,21 @@ def run_gpt_prompt_pronunciatio(action_description, persona, verbose=False):
   example_output = "🛁🧖‍♀️" ########
   special_instruction = "The value for the output must ONLY contain the emojis." ########
   fail_safe = get_fail_safe()
-  output = ChatGPT_safe_generate_response(prompt, example_output, special_instruction, 3, fail_safe,
-                                          __chat_func_validate, __chat_func_clean_up, True)
+
+
+
+
+  output = safe_generate_structured_response(
+      prompt=prompt,
+      gpt_parameters=gpt_param,
+      response_model=PronunciationSelection,
+      repeat=5,
+      fail_safe_response=fail_safe,
+      verbose=True
+  )
+
+  output = output.selected_pronunciation
+
   if output != False: 
     return output, [output, prompt, gpt_param, prompt_input, fail_safe]
   # ChatGPT Plugin ===========================================================
@@ -909,6 +988,27 @@ def run_gpt_prompt_event_triple(action_description, persona, verbose=False):
   def get_fail_safe(persona): 
     fs = (persona.name, "is", "idle")
     return fs
+  
+
+  class ActionTripletSelection(BaseModel):
+    """Structured output for action triplet selection task"""
+    subject: str = Field(
+        ..., 
+        description="The sentence subject from available options"
+    )
+    predicate: str = Field(
+        ..., 
+        description="The sentence predicate from available options"
+    )
+    object: str = Field(
+        ..., 
+        description="The sentence object from available options"
+    )
+    reasoning: Optional[str] = Field(
+        None,
+        description="Brief reasoning for the selections"
+    )
+
 
 
   # ChatGPT Plugin ===========================================================
@@ -944,17 +1044,24 @@ def run_gpt_prompt_event_triple(action_description, persona, verbose=False):
 
 
 
-  gpt_param = {"engine": "text-davinci-003", "max_tokens": 30, 
+  gpt_param = {"model": "llama3.1:8b", "max_tokens": 500, 
                "temperature": 0, "top_p": 1, "stream": False,
-               "frequency_penalty": 0, "presence_penalty": 0, "stop": ["\n"]}
+               "frequency_penalty": 0, "presence_penalty": 0, "stop": []}
   prompt_template = "persona/prompt_template/v2/generate_event_triple_v1.txt"
   prompt_input = create_prompt_input(action_description, persona)
   prompt = generate_prompt(prompt_input, prompt_template)
 
   fail_safe = get_fail_safe(persona) ########
-  output = safe_generate_response(prompt, gpt_param, 5, fail_safe,
-                                   __func_validate, __func_clean_up)
-  output = (persona.name, output[1], output[2])
+  output = safe_generate_structured_response(
+      prompt=prompt,
+      gpt_parameters=gpt_param,
+      response_model=ActionTripletSelection,
+      repeat=5,
+      fail_safe_response=fail_safe,
+      verbose=True
+  )
+
+  output = (output.subject, output.predicate, output.object)
 
   if debug or verbose: 
     print_run_prompts(prompt_template, persona, gpt_param, 
@@ -1024,7 +1131,12 @@ def run_gpt_prompt_act_obj_desc(act_game_object, act_desp, persona, verbose=Fals
   fail_safe = get_fail_safe(act_game_object) ########
   output = ChatGPT_safe_generate_response(prompt, example_output, special_instruction, 3, fail_safe,
                                           __chat_func_validate, __chat_func_clean_up, True)
-  if output != False: 
+
+  if debug or verbose:
+    print_run_prompts(prompt_template, persona, gpt_param,
+                      prompt_input, prompt, output)
+
+  if output != False:
     return output, [output, prompt, gpt_param, prompt_input, fail_safe]
   # ChatGPT Plugin ===========================================================
 

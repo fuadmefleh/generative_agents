@@ -18,7 +18,7 @@ class Scratch:
     # them. 
     self.vision_r = 4
     # <att_bandwidth> TODO 
-    self.att_bandwidth = 3
+    self.att_bandwidth = 9
     # <retention> TODO 
     self.retention = 5
 

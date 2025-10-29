@@ -8,6 +8,7 @@ import datetime
 import math
 import random 
 import sys
+from tabnanny import verbose
 import time
 sys.path.append('../../')
 
@@ -219,6 +220,9 @@ def generate_action_game_object(act_desp, act_address, persona, maze):
   """
   if debug: print ("GNS FUNCTION: <generate_action_game_object>")
   if not persona.s_mem.get_str_accessible_arena_game_objects(act_address): 
+    print(f"Failed to find accessible game objects for {act_address}")
+    print(f"Persona memory arenas: {persona.s_mem}")
+    print(f"Returning random placeholder object.")
     return "<random>"
   return run_gpt_prompt_action_game_object(act_desp, persona, maze, act_address)[0]
 
@@ -626,13 +630,24 @@ def _determine_action(persona, maze):
   act_world = maze.access_tile(persona.scratch.curr_tile)["world"]
   # act_sector = maze.access_tile(persona.scratch.curr_tile)["sector"]
   act_sector = generate_action_sector(act_desp, persona, maze)
+  print( "ACT SECTOR:::: ", act_sector)
+
   act_arena = generate_action_arena(act_desp, persona, maze, act_world, act_sector)
+  print( "ACT ARENA:::: ", act_arena)
+
   act_address = f"{act_world}:{act_sector}:{act_arena}"
   act_game_object = generate_action_game_object(act_desp, act_address,
                                                 persona, maze)
+  print( "ACT GAME OBJECT:::: ", act_game_object)
+  
+
   new_address = f"{act_world}:{act_sector}:{act_arena}:{act_game_object}"
   act_pron = generate_action_pronunciatio(act_desp, persona)
+  print ( "ACT PRON:::: ", act_pron)
+
   act_event = generate_action_event_triple(act_desp, persona)
+  print ( "ACT EVENT:::: ", act_event)
+
   # Persona's actions also influence the object states. We set those up here. 
   act_obj_desp = generate_act_obj_desc(act_game_object, act_desp, persona)
   act_obj_pron = generate_action_pronunciatio(act_obj_desp, persona)

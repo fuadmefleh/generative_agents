@@ -8,6 +8,29 @@ Variables:
 <commentblockmarker>###</commentblockmarker>
 Task: Convert the input sentence into a triplet format. Respond ONLY with the triplet in the exact format shown. Do not include any explanations or additional text.
 
+Fill out the JSON schema:
+
+"""Structured output for action triplet selection task"""
+    subject: str = Field(
+        ..., 
+        description="The sentence subject from available options"
+    )
+    predicate: str = Field(
+        ..., 
+        description="The sentence predicate from available options"
+    )
+    object: str = Field(
+        ..., 
+        description="The sentence object from available options"
+    )
+    reasoning: Optional[str] = Field(
+        None,
+        description="Brief reasoning for the selections"
+    )
+
+
+
+
 Examples:
 Input: Sam Johnson is eating breakfast. 
 Output: (Sam Johnson, eat, breakfast) 

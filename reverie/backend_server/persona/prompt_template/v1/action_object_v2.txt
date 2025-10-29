@@ -3,6 +3,18 @@ Variables:
 !<INPUT 1>! -- Objects available
 
 <commentblockmarker>###</commentblockmarker>
+Format your answer in the provided JSON strucuture:
+
+""Structured output for object selection task"""
+    selected_object: str = Field(
+        ..., 
+        description="The selected object from available options"
+    )
+    reasoning: Optional[str] = Field(
+        None,
+        description="Brief reasoning for the selection"
+    )
+
 Current activity: sleep in bed
 Objects available: {bed, easel, closet, painting}
 Pick ONE most relevant object from the objects available: bed

@@ -96,10 +96,14 @@ class MemoryTree:
     EXAMPLE STR OUTPUT
       "phone, charger, bed, nightstand"
     """
+    print( f"[MemoryTree] get_str_accessible_arena_game_objects called with arena: {arena}" )
     curr_world, curr_sector, curr_arena = arena.split(":")
 
     if not curr_arena: 
       return ""
+    
+    print( self.tree[curr_world])
+    print( self.tree[curr_world][curr_sector])
 
     try: 
       x = ", ".join(list(self.tree[curr_world][curr_sector][curr_arena]))

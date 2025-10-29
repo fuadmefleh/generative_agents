@@ -91,9 +91,13 @@ def execute(persona, maze, personas, plan):
       
       # Strip <random> suffix if present (it should have been handled above, but just in case)
       clean_plan = plan.replace(":<random>", "")
+
+      print( "CLEAN PLAN:::: ", clean_plan)
       
+      print( "MAZE ADDRESS TILES:::: ", maze.address_tiles.keys())
       if clean_plan not in maze.address_tiles: 
-        target_tiles = maze.address_tiles["Johnson Park:park:park garden"] #ERRORRRRRRR
+        print("WARNING: Address not found in maze.address_tiles. Defaulting to Johnson Park.")
+        target_tiles = maze.address_tiles["Johnson Park:park"] #ERRORRRRRRR
       else: 
         target_tiles = maze.address_tiles[clean_plan]
         

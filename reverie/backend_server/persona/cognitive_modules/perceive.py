@@ -50,29 +50,40 @@ def perceive(persona, maze):
   # We get the nearby tiles given our current tile and the persona's vision
   # radius. 
   nearby_tiles = maze.get_nearby_tiles(persona.scratch.curr_tile, 
-                                       persona.scratch.vision_r)
+                                      25)
+  
+  print( f"[Perceive] Persona {persona.name} is perceiving nearby space at tile {persona.scratch.curr_tile} with vision radius {persona.scratch.vision_r}." )
+
+  #print( f"[Perceive] Nearby tiles: {nearby_tiles}" )
 
   # We then store the perceived space. Note that the s_mem of the persona is
   # in the form of a tree constructed using dictionaries. 
   for i in nearby_tiles: 
     i = maze.access_tile(i)
+    #print( f"[Perceive] Persona {persona.name} perceived space: {i}" )
     if i["world"]: 
       if (i["world"] not in persona.s_mem.tree): 
         persona.s_mem.tree[i["world"]] = {}
+
     if i["sector"]: 
       if (i["sector"] not in persona.s_mem.tree[i["world"]]): 
         persona.s_mem.tree[i["world"]][i["sector"]] = {}
+
     if i["arena"]: 
       if (i["arena"] not in persona.s_mem.tree[i["world"]]
                                               [i["sector"]]): 
         persona.s_mem.tree[i["world"]][i["sector"]][i["arena"]] = []
+
     if i["game_object"]: 
       if (i["game_object"] not in persona.s_mem.tree[i["world"]]
                                                     [i["sector"]]
                                                     [i["arena"]]): 
         persona.s_mem.tree[i["world"]][i["sector"]][i["arena"]] += [
                                                              i["game_object"]]
+        
 
+
+  persona.s_mem.print_tree()
   # PERCEIVE EVENTS. 
   # We will perceive events that take place in the same arena as the
   # persona's current arena. 
