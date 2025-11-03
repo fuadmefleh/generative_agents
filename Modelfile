@@ -1,0 +1,11 @@
+# Ollama Modelfile for GPT OSS 20B with 32k context window
+# This file configures a GPT-style open source 20B parameter model
+
+# Base model - specify the actual model path or name
+# Replace this with the actual model location/name
+FROM gpt-oss:20b
+
+
+# Set the context window to 32k tokens
+PARAMETER num_ctx 32768
+
