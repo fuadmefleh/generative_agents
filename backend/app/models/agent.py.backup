@@ -1,0 +1,656 @@
+from enum import Enum
+from app.llm.client import OllamaClient, StructuredPromptBuilder
+from pydantic import BaseModel, Field
+from typing import Dict, Any, List, Optional, Tuple
+from datetime import datetime
+from pydantic import validator
+import random
+from app.models.models import Point2D, Plan
+
+
+class ActionType(str, Enum):
+    """Types of actions agents can perform."""
+    MOVE = "move"
+    INTERACT = "interact"
+    CONVERSE = "converse"
+    USE_OBJECT = "use_object"
+    WAIT = "wait"
+    REFLECT = "reflect"
+
+class ActionDecision(BaseModel):
+    """AI-generated action decision."""
+    action_type: ActionType
+    reasoning: str
+    target_location: str
+    target_sub_location: Optional[str] = None
+    target_object: Optional[str] = None
+    target_agent: Optional[str] = None
+    priority: int = Field(ge=1, le=10, default=5)  # 1=low, 10=critical
+
+class AgentMemory(BaseModel):
+    visited_locations: set[Point2D] = Field(default_factory=set)
+    current_path: Optional[list[Point2D]] = None  # Immutable sequence of points
+    known_object_positions: Dict[Tuple[str, str, str], List[Point2D]] = Field(default_factory=dict)  # (Sector Name, Sub Location Name, Object ID) to position mapping
+
+    def recall_object(self, sector_name: str, sub_location_name: str, object_id: str) -> Optional[List[Point2D]]:
+        """Recall known object by sector, sub-location, and ID."""
+        # If sub_location_name is None, return all known positions for the object in the sector
+        if sub_location_name is None:
+            return [pos for (sec, sub, obj), pos in self.known_object_positions.items() if sec == sector_name and obj == object_id]
+        return self.known_object_positions.get((sector_name, sub_location_name, object_id), None)
+
+    def remember_object(self, sector_name: str, sub_location_name: str, object_id: str, position: Point2D):
+        """Store known object by sector, sub-location, and ID."""
+        if self.known_object_positions.get((sector_name, sub_location_name, object_id)) is None:
+            self.known_object_positions[(sector_name, sub_location_name, object_id)] = []
+        
+        # Avoid duplicates
+        if position not in self.known_object_positions[(sector_name, sub_location_name, object_id)]:
+            self.known_object_positions[(sector_name, sub_location_name, object_id)].append(position)
+
+class AgentNeeds(BaseModel):
+    energy: float = Field(default=100.0, ge=0.0, le=100.0)
+    hunger: float = Field(default=0.0, ge=0.0, le=100.0)
+    bladder: float = Field(default=0.0, ge=0.0, le=100.0)
+    social: float = Field(default=100.0, ge=0.0, le=100.0)
+    fun: float = Field(default=100.0, ge=0.0, le=100.0)
+    hygiene: float = Field(default=100.0, ge=0.0, le=100.0)
+
+    # Decay rates per tick
+    ENERGY_DECAY_RATE: float = 0.5
+    HUNGER_INCREASE_RATE: float = 0.3
+    BLADDER_INCREASE_RATE: float = 0.25
+    SOCIAL_DECAY_RATE: float = 0.2
+    FUN_DECAY_RATE: float = 0.15
+    HYGIENE_DECAY_RATE: float = 0.1
+
+    def tick(self):
+        """Update needs based on decay rates."""
+        self.energy = max(0.0, self.energy - self.ENERGY_DECAY_RATE)
+        self.hunger = min(100.0, self.hunger + self.HUNGER_INCREASE_RATE)
+        self.bladder = min(100.0, self.bladder + self.BLADDER_INCREASE_RATE)
+        self.social = max(0.0, self.social - self.SOCIAL_DECAY_RATE)
+        self.fun = max(0.0, self.fun - self.FUN_DECAY_RATE)
+        self.hygiene = max(0.0, self.hygiene - self.HYGIENE_DECAY_RATE)
+    
+    def get_critical_needs(self) -> List[str]:
+        """Get list of needs that are critical (below 30 or above 70)."""
+        critical = []
+        if self.energy < 30:
+            critical.append("energy (very tired)")
+        if self.hunger > 70:
+            critical.append("hunger (very hungry)")
+        if self.bladder > 70:
+            critical.append("bladder (need bathroom)")
+        if self.social < 30:
+            critical.append("social (lonely)")
+        if self.fun < 30:
+            critical.append("fun (bored)")
+        if self.hygiene < 30:
+            critical.append("hygiene (dirty)")
+        return critical
+    
+    def to_description(self) -> str:
+        """Get a natural language description of current needs."""
+        status = []
+        if self.energy < 30:
+            status.append("exhausted")
+        elif self.energy < 60:
+            status.append("tired")
+        
+        if self.hunger > 70:
+            status.append("very hungry")
+        elif self.hunger > 40:
+            status.append("hungry")
+        
+        if self.bladder > 70:
+            status.append("urgently needs bathroom")
+        elif self.bladder > 40:
+            status.append("needs bathroom")
+        
+        if self.social < 30:
+            status.append("lonely")
+        if self.fun < 30:
+            status.append("bored")
+        if self.hygiene < 30:
+            status.append("feeling dirty")
+        
+        return ", ".join(status) if status else "feeling good"
+
+class AgentState(BaseModel):
+    """Current state of an agent."""
+    agent_id: str
+    name: str
+    background: Optional[str] = None
+    location: Point2D
+    home_location_name: str
+    current_action: Optional[ActionDecision] = None
+    current_plan: Optional[Plan] = None
+    status: str = Field(default="idle")
+    last_reflection_time: Optional[datetime] = Field(default_factory=datetime.utcnow)
+    relationship_scores: Dict[str, float] = Field(default_factory=dict)
+    
+    def update_relationship(self, other_agent_id: str, delta: float):
+        """Update relationship score with another agent."""
+        current = self.relationship_scores.get(other_agent_id, 0.0)
+        self.relationship_scores[other_agent_id] = max(-1.0, min(1.0, current + delta))
+
+
+class Agent(BaseModel):
+    """Representation of an agent in the world."""
+    state: AgentState
+    memory: AgentMemory = Field(default_factory=AgentMemory)
+    needs: AgentNeeds = Field(default_factory=AgentNeeds)
+    ollama_client: Any = Field(default_factory=OllamaClient)
+    is_setup: bool = Field(default=False)
+    last_decision_time: int = 0  # Tick number when last decision was made
+    decision_cooldown: int = 3  # Ticks between decisions
+    current_action_start: Optional[datetime] = None
+
+    def get_current_location_name(self, simulation) -> Optional[str]:
+        """Get the name of the current main location."""
+        for sector_name, sector in simulation.world.sectors.items():
+            for tile in sector.tiles:
+                if tile.location.x == self.state.location.x and tile.location.y == self.state.location.y:
+                    return sector_name
+        return None
+    
+    def get_nearby_agents(self, simulation, radius: float = 10.0) -> List[Dict[str, Any]]:
+        """Get list of nearby agents within radius."""
+        nearby = []
+        for agent in simulation.agents:
+            if agent.state.agent_id != self.state.agent_id:
+                distance = self.state.location.distance_to(agent.state.location)
+                if distance <= radius:
+                    nearby.append({
+                        "name": agent.state.name,
+                        "distance": distance,
+                        "location": agent.get_current_location_name(simulation)
+                    })
+        return nearby
+    
+    def get_nearby_objects(self, simulation) -> List[Dict[str, Any]]:
+        """Get objects in the current location."""
+        nearby = []
+        current_loc = self.get_current_location_name(simulation)
+        if not current_loc or current_loc not in simulation.world.sectors:
+            return nearby
+        
+        sector = simulation.world.sectors[current_loc]
+        for sub_loc, objs in sector.sub_locations.items():
+            for obj in objs:
+                nearby.append({
+                    "id": obj.get("id"),
+                    "sub_location": sub_loc,
+                    "location": obj.get("location")
+                })
+        return nearby[:10]  # Limit to 10 nearest objects
+
+    def execute_action(self, decision: ActionDecision, simulation):
+        """Execute the decided action."""
+        # Map action type to need fulfillment
+        if decision.action_type == ActionType.USE_OBJECT:
+            if decision.target_object and "bed" in decision.target_object.lower():
+                self.needs.energy = min(100.0, self.needs.energy + 20)
+                print(f"{self.state.name} is sleeping (+20 energy)")
+            elif decision.target_object and "refrigerator" in decision.target_object.lower():
+                self.needs.hunger = max(0.0, self.needs.hunger - 30)
+                print(f"{self.state.name} is eating (-30 hunger)")
+            elif decision.target_object and "toilet" in decision.target_object.lower():
+                self.needs.bladder = max(0.0, self.needs.bladder - 40)
+                print(f"{self.state.name} is using toilet (-40 bladder)")
+            elif decision.target_object and ("shower" in decision.target_object.lower() or "sink" in decision.target_object.lower()):
+                self.needs.hygiene = min(100.0, self.needs.hygiene + 25)
+                print(f"{self.state.name} is cleaning up (+25 hygiene)")
+            elif decision.target_object and ("tv" in decision.target_object.lower() or "game" in decision.target_object.lower() or "piano" in decision.target_object.lower()):
+                self.needs.fun = min(100.0, self.needs.fun + 15)
+                print(f"{self.state.name} is having fun (+15 fun)")
+        
+        elif decision.action_type == ActionType.CONVERSE:
+            self.needs.social = min(100.0, self.needs.social + 20)
+            print(f"{self.state.name} is socializing (+20 social)")
+        
+        elif decision.action_type == ActionType.WAIT:
+            # Small recovery
+            self.needs.energy = min(100.0, self.needs.energy + 2)
+            self.needs.fun = min(100.0, self.needs.fun + 1)
+    
+    def decide_next_action(self, simulation) -> Optional[ActionDecision]:
+        """Use AI to decide next action based on needs, environment, and personality."""
+        
+        # Get context
+        needs_desc = self.needs.to_description()
+        critical_needs = self.needs.get_critical_needs()
+        nearby_agents = self.get_nearby_agents(simulation)
+        nearby_objects = self.get_nearby_objects(simulation)
+        current_location = self.get_current_location_name(simulation)
+        current_time = simulation.world_time.strftime("%I:%M %p")
+        
+        # Build prompt
+        system_prompt = f"""You are an autonomous agent making decisions in a simulated world, like The Sims.
+
+AGENT INFO:
+- Name: {self.state.name}
+- Background: {self.state.background}
+- Current location: {current_location}
+- Current time: {current_time}
+
+CURRENT STATE:
+- Feelings: {needs_desc}
+- Critical needs: {', '.join(critical_needs) if critical_needs else 'None'}
+- Energy: {self.needs.energy:.0f}/100
+- Hunger: {self.needs.hunger:.0f}/100
+- Bladder: {self.needs.bladder:.0f}/100
+- Social: {self.needs.social:.0f}/100
+- Fun: {self.needs.fun:.0f}/100
+- Hygiene: {self.needs.hygiene:.0f}/100
+
+NEARBY AGENTS:
+{chr(10).join([f"- {a['name']} ({a['distance']}m away)" for a in nearby_agents]) if nearby_agents else "No one nearby"}
+
+AVAILABLE OBJECTS NEARBY:
+{chr(10).join([f"- {o['id']} in {o['sub_location']}" for o in nearby_objects[:5]]) if nearby_objects else "None"}
+
+INSTRUCTIONS:
+Decide what this agent should do RIGHT NOW. Consider:
+1. Critical needs (hunger > 70, energy < 30, etc.) should be addressed urgently
+2. Social interactions if other agents are nearby and social need is low
+3. Personality and background should influence choices
+4. Time of day (sleep at night, eat at meal times, etc.)
+5. Don't just repeat the same action - vary behavior
+
+AVAILABLE ACTION TYPES:
+- MOVE: Go to a specific location
+- USE_OBJECT: Interact with an object (eat, sleep, shower, etc.)
+- CONVERSE: Talk to another agent
+- WAIT: Stand/sit and think
+- REFLECT: Think deeply about recent experiences
+
+Provide: action_type, reasoning (why this choice), target_location, target_sub_location (optional), target_object (optional), target_agent (optional), priority (1-10, where 10=critical need)"""
+
+        prompt = f"What should {self.state.name} do right now?"
+        
+        try:
+            decision = self.ollama_client.generate_structured(
+                system=system_prompt,
+                prompt=prompt,
+                response_model=ActionDecision,
+                temperature=0.7,
+                max_retries=2
+            )
+            return decision
+        except Exception as e:
+            print(f"Error getting AI decision for agent {self.state.agent_id}: {e}")
+            # Fallback: address most critical need
+            if self.needs.energy < 20:
+                return ActionDecision(
+                    action_type=ActionType.USE_OBJECT,
+                    reasoning="Too tired, need to sleep",
+                    target_location=self.state.home_location_name,
+                    target_sub_location="bedroom",
+                    target_object="bed",
+                    priority=10
+                )
+            elif self.needs.hunger > 80:
+                return ActionDecision(
+                    action_type=ActionType.USE_OBJECT,
+                    reasoning="Very hungry, need food",
+                    target_location=self.state.home_location_name,
+                    target_sub_location="kitchen",
+                    target_object="refrigerator",
+                    priority=9
+                )
+            return None
+        """Decide on the next action based on current state and needs."""
+        # Placeholder logic: if hunger > 80, look for food
+        if self.needs.hunger > 80.0:
+            food_location = self._find_nearest_food(simulation)
+            if food_location:
+                return AgentAction(
+                    agent_id=self.state.agent_id,
+                    action_type=ActionType.MOVE,
+                    description=f"{self.state.name} is moving towards food.",
+                    location=f"{food_location.x},{food_location.y}",
+                    duration_seconds=5,
+                    success_probability=0.8
+                )
+            # Find nearest food object in the world (not implemented)
+            # For now, just return a wait action
+            return AgentAction(
+                agent_id=self.state.agent_id,
+                action_type=ActionType.WAIT,
+                description=f"{self.state.name} is waiting to find food.",
+                location=f"{self.state.location.x},{self.state.location.y}",
+                duration_seconds=10,
+                success_probability=1.0
+            )
+        # Default action: move randomly
+        return None  # Let tick handle movement for now
+    
+    def prime_memories(self, simulation):
+        """Prime the agent's memory with relevant information."""
+    def setup(self, simulation):
+        """Initial setup for the agent within the simulation."""
+        self.prime_memories(simulation)
+        
+        # Start at home
+        home_positions = simulation.world.get_sub_locations_positions_for_main_location(
+            self.state.home_location_name
+        )
+        if home_positions:
+            chosen_position = random.choice(home_positions)
+            self.state.location = Point2D(x=chosen_position.x, y=chosen_position.y)
+            print(f"Agent {self.state.agent_id} starting at ({chosen_position.x}, {chosen_position.y}) in {self.state.home_location_name}")
+        
+        self.is_setup = True
+    def setup(self, simulation):
+        import json
+        """Initial setup for the agent within the simulation."""
+
+        # We need to make our daily schedule 
+        # Get a range of hours in the day (0-23)
+        hours = list(range(24))
+        agent_background = f"I am agent {self.state.name}, with ID: {self.state.agent_id}. Background: {self.state.background or "An ordinary person."}"
+        system_prompt = """You are a scheduling assistant that generates realistic hourly actions for simulation agents based on their background and current context.
+
+        ## Time Format
+        - Hour 0 = 12:00 AM (midnight)
+        - Hour 23 = 11:00 PM
+        - Generate contextually appropriate actions for each hour of the day
+
+        ## Action Requirements
+        1. Each action must specify an action_type (e.g., 'wait', 'move', 'interact')
+        2. Include a descriptive explanation of what the agent is doing
+        3. If using an object/furniture, specify it in the target_object field
+        4. Specify the location and sub_location where the action occurs
+        5. Consider typical human patterns (sleep at night, meals at regular times, work/leisure balance)
+
+        ## Response Format
+        Always respond using the provided JSON schema following the AgentAction structure.
+
+        ## Available Objects
+        Bedroom: bed, desk, closet, shelf, easel
+        Bathroom: bathroom sink, shower, toilet
+        Kitchen: kitchen sink, refrigerator, toaster, cooking area
+        Common Areas: common room table, common room sofa, guitar, microphone, piano, game console, computer desk, computer
+        Bar/Cafe: bar customer seating, behind the bar counter, behind the cafe counter, cafe customer seating
+        Library: library sofa, bookshelf, library table
+        Classroom: classroom student seating, classroom podium, blackboard
+        Stores: behind the pharmacy counter, behind the grocery counter, pharmacy store shelf, grocery store shelf, pharmacy store counter, grocery store counter, supply store product shelf, behind the supply store counter, supply store counter
+        Outdoor: dorm garden, house garden, garden chair, park garden
+        Recreation: harp, lifting weight, pool table"""
+
+        # Add dynamic location information
+        locations = simulation.world.get_all_main_locations()
+        system_prompt += f"\n\n## Available Main Locations\n{', '.join(locations)}"
+
+        # Add sub-location mapping
+        system_prompt += "\n\n## Location Hierarchy\n"
+        sub_locations = simulation.world.map.arena_main_locations_to_sub_locations
+        sub_locations = {k: list(v) for k, v in sub_locations.items()}
+        system_prompt += json.dumps(sub_locations, indent=2)
+
+        # Add more detailed examples
+        system_prompt += """
+
+        ## Schedule Examples
+
+        ### Early Morning (0-5)
+        Hour 0: {"agent_id": "2", "action_type": "wait", "description": "Sleeping peacefully in bed.", "target_agent": null, "target_object": "bed", "location": "artist's co-living space", "sub_location": "Latoya Williams's room"}
+
+        ### Morning (6-11)
+        Hour 7: {"agent_id": "2", "action_type": "wait", "description": "Taking a morning shower.", "target_agent": null, "target_object": "shower", "location": "artist's co-living space", "sub_location": "bathroom"}
+        Hour 8: {"agent_id": "2", "action_type": "wait", "description": "Preparing and eating breakfast.", "target_agent": null, "target_object": "refrigerator", "location": "artist's co-living space", "sub_location": "kitchen"}
+
+        ### Afternoon (12-17)
+        Hour 14: {"agent_id": "2", "action_type": "wait", "description": "Working at desk on creative projects.", "target_agent": null, "target_object": "desk", "location": "artist's co-living space", "sub_location": "Latoya Williams's room"}
+
+        ### Evening (18-23)
+        Hour 19: {"agent_id": "2", "action_type": "wait", "description": "Socializing in the common room.", "target_agent": null, "target_object": "common room sofa", "location": "artist's co-living space", "sub_location": "common room"}
+
+        ## Guidelines
+        - Ensure activities align with the agent's background and personality
+        - Create realistic daily patterns (sleep, meals, work, leisure)
+        - Vary activities to make the schedule interesting but believable
+        - Consider social interactions during appropriate hours
+        - Match activities to appropriate locations and objects"""
+
+        # if there is a saved daily schedule, load it
+        schedule_file = f"./agent_{self.state.agent_id}_daily_schedule.json"
+        try:
+            with open(schedule_file, "r") as f:
+                saved_schedule = json.load(f)
+                saved_schedule = saved_schedule["hour_action"]
+                for hour_str, action_data in saved_schedule.items():
+                    hour = int(hour_str)
+                    action = AgentAction(**action_data)
+                    self.daily_schedule.hour_action[hour] = action
+            print( f"Loaded saved daily schedule for agent {self.state.agent_id} from {schedule_file}" )
+            self.is_setup = True
+            
+        except FileNotFoundError:
+            print( f"No saved daily schedule found for agent {self.state.agent_id}, creating default schedule." )
+
+            # Create a simple default schedule to get agents moving
+            # This avoids slow LLM generation and JSON parsing errors
+            default_schedule = self._create_default_schedule(simulation)
+            self.daily_schedule.hour_action = default_schedule
+            
+            #save the daily schedule to a json file for debugging
+            import json
+            with open(f"./agent_{self.state.agent_id}_daily_schedule.json", "w") as f:
+                json.dump(self.daily_schedule.dict(), f, indent=2)
+
+        self.prime_memories(simulation)
+
+        # Get the action for the current simulation time and set initial position
+        current_hour = simulation.world_time.hour
+        if current_hour in self.daily_schedule.hour_action:
+            self.state.current_action = self.daily_schedule.hour_action[current_hour]
+            # Now move to that location, take the location and look up coordinates
+            location = self.state.current_action.location
+            # if there is a sublocation, look up its coordinates as well
+            sublocation = self.state.current_action.sub_location
+            world = simulation.world
+            print( f"Agent {self.state.agent_id} initial action set to hour {current_hour} action: {self.state.current_action.action_type} at location {location}, sublocation {sublocation}" )
+            positions = []
+            if sublocation:
+                positions = world.get_map_of_sub_location_to_positions_for_main_location(location).get(sublocation, [])
+            else:
+                positions = world.get_sub_locations_positions_for_main_location(location)
+            if positions:
+                chosen_position = random.choice(positions)
+                print( f"Agent {self.state.agent_id} initial position set to ({chosen_position.x}, {chosen_position.y}) in location {location}, sublocation {sublocation}" )
+                self.state.location = Point2D(x=chosen_position.x, y=chosen_position.y)
+
+        self.is_setup = True
+        
+
+
+    def tick(self, simulation):
+        """Advance the agent's state within the simulation."""
+        # Check if our memory is empty and needs priming
+        print( self.state.background )
+
+        if not self.is_setup:
+            self.setup(simulation)
+
+        # print( f"Agent {self.state.agent_id} at location ({self.state.location.x}, {self.state.location.y})" )
+        # print( self.get_current_location_name(simulation) )
+        # print( self.get_current_sub_location_name(simulation) )
+        # print( self._find_nearest_food(simulation) )
+
+        self.state.last_reflection_time = datetime.utcnow()
+        # Additional logic for the agent's actions can be added here
+
+        # Put our current location in memory
+        self.memory.visited_locations.add(self.state.location)
+
+        # Tick needs
+        self.needs.tick()
+
+        # Use our needs to decide on an action
+
+
+
+        # Find a place to move (randomly for now)
+        simulation_world = simulation.world
+
+        # Follow the current path if we have one
+        if self.memory.current_path:
+            # Move multiple steps per tick for faster movement (5 steps per tick)
+            steps_per_tick = 5
+            for _ in range(min(steps_per_tick, len(self.memory.current_path))):
+                if self.memory.current_path:
+                    next_point = self.memory.current_path.pop(0)
+                    self.state.location = Point2D(x=next_point.x, y=next_point.y)
+            
+            if not self.memory.current_path:
+                self.memory.current_path = None  # Clear path when done
+            self.state.status = "moved"
+            return self.state
+            
+        # No current path, check if we need to pick a new action from our daily schedule
+        current_hour = simulation.world_time.hour
+        if current_hour in self.daily_schedule.hour_action:
+            scheduled_action = self.daily_schedule.hour_action[current_hour]
+            
+            # Check if this is a new action (different from current_action or if we don't have one)
+            is_new_action = (
+                self.state.current_action is None or 
+                self.state.current_action.sub_location != scheduled_action.sub_location or
+                self.state.current_action.location != scheduled_action.location
+            )
+            
+            print(f"Agent {self.state.agent_id} at hour {current_hour}: is_new_action={is_new_action}, current_subloc={self.state.current_action.sub_location if self.state.current_action else 'None'}, scheduled_subloc={scheduled_action.sub_location}")
+            
+            self.state.current_action = scheduled_action
+            
+            # If this is a new action or we need to move to a different location, find a path
+            if is_new_action:
+                # Get target position based on location and sub_location
+                target_positions = []
+                if scheduled_action.sub_location:
+                    positions_map = simulation_world.get_map_of_sub_location_to_positions_for_main_location(
+                        scheduled_action.location
+                    )
+                    target_positions = positions_map.get(scheduled_action.sub_location, [])
+                else:
+                    target_positions = simulation_world.get_sub_locations_positions_for_main_location(
+                        scheduled_action.location
+                    )
+                
+                print(f"Agent {self.state.agent_id} found {len(target_positions)} target positions")
+                
+                if target_positions:
+                    # Pick a random position in the target location
+                    target_pos = random.choice(target_positions)
+                    
+                    # Only create a path if we're not already at the target
+                    if self.state.location.x != target_pos.x or self.state.location.y != target_pos.y:
+                        path = simulation_world.find_path(self.state.location, target_pos)
+                        if path and len(path) > 0:
+                            self.memory.current_path = path
+                            # Move along the path
+                            next_point = path[0]
+                            self.state.location = Point2D(x=next_point.x, y=next_point.y)
+                            self.state.status = "moved"
+                            print(f"Agent {self.state.agent_id} moving to {scheduled_action.sub_location or scheduled_action.location}: ({self.state.location.x}, {self.state.location.y})")
+                            return self.state
+                        else:
+                            print(f"Agent {self.state.agent_id} could not find path to target")
+                    else:
+                        print(f"Agent {self.state.agent_id} already at target position")
+
+
+        # free_tiles = simulation_world.get_free_tiles()
+
+        # if not free_tiles:
+        #     print( f"Agent {self.state.agent_id} found no free tiles to move to." )
+        #     return self.state  # No free tiles to move to
+        
+        # new_tile = random.choice(free_tiles)
+        # new_x, new_y = new_tile.location.x, new_tile.location.y
+
+    def tick(self, simulation):
+        """Advance the agent's state within the simulation."""
+        if not self.is_setup:
+            self.setup(simulation)
+            return self.state
+
+        # Update needs every tick
+        self.needs.tick()
+        
+        # Put current location in memory
+        self.memory.visited_locations.add(self.state.location)
+
+        # Follow the current path if we have one
+        if self.memory.current_path:
+            # Move multiple steps per tick for faster movement (5 steps per tick)
+            steps_per_tick = 5
+            for _ in range(min(steps_per_tick, len(self.memory.current_path))):
+                if self.memory.current_path:
+                    next_point = self.memory.current_path.pop(0)
+                    self.state.location = Point2D(x=next_point.x, y=next_point.y)
+            
+            if not self.memory.current_path:
+                self.memory.current_path = None  # Clear path when done
+                # Execute action at destination
+                if self.state.current_action:
+                    decision = ActionDecision(
+                        action_type=ActionType.USE_OBJECT,
+                        reasoning="Arrived at destination",
+                        target_location=self.get_current_location_name(simulation) or "",
+                        target_object=getattr(self.state.current_action, 'target_object', None)
+                    )
+                    self.execute_action(decision, simulation)
+            
+            self.state.status = "moving"
+            return self.state
+        
+        # Make decision every few ticks
+        current_tick = getattr(simulation, 'tick_count', 0)
+        if current_tick - self.last_decision_time >= self.decision_cooldown:
+            decision = self.decide_next_action(simulation)
+            
+            if decision:
+                self.last_decision_time = current_tick
+                print(f"{self.state.name}: {decision.reasoning} → {decision.action_type.value}")
+                
+                # Get target position
+                target_positions = []
+                if decision.target_sub_location:
+                    positions_map = simulation.world.get_map_of_sub_location_to_positions_for_main_location(
+                        decision.target_location
+                    )
+                    target_positions = positions_map.get(decision.target_sub_location, [])
+                else:
+                    target_positions = simulation.world.get_sub_locations_positions_for_main_location(
+                        decision.target_location
+                    )
+                
+                if target_positions:
+                    target_pos = random.choice(target_positions)
+                    
+                    # Only create path if not already there
+                    if self.state.location.x != target_pos.x or self.state.location.y != target_pos.y:
+                        path = simulation.world.find_path(self.state.location, target_pos)
+                        if path and len(path) > 0:
+                            self.memory.current_path = path
+                            self.state.current_action = decision
+                            self.state.status = "moving"
+                        else:
+                            # Can't path, execute action anyway
+                            self.execute_action(decision, simulation)
+                            self.state.status = "acting"
+                    else:
+                        # Already at target, execute immediately
+                        self.execute_action(decision, simulation)
+                        self.state.status = "acting"
+                else:
+                    print(f"No valid positions found for {decision.target_location}")
+                    self.state.status = "idle"
+        else:
+            self.state.status = "waiting"
+        
+        return self.state

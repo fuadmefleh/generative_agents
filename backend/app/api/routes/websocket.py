@@ -153,17 +153,59 @@ class ConnectionManager:
         try:
             agents = []
             for agent_id, agent_state in world.state.agents.items():
-                agents.append({
+                # Get the full agent from simulation if available
+                full_agent = None
+                if hasattr(simulation, 'agents') and agent_id in simulation.agents:
+                    full_agent = simulation.agents[agent_id]
+                
+                # Handle current_action safely - it can be None
+                current_action_data = None
+                if hasattr(agent_state, 'current_action') and agent_state.current_action is not None:
+                    current_action_data = {
+                        "action_type": agent_state.current_action.action_type.value if hasattr(agent_state.current_action.action_type, 'value') else str(agent_state.current_action.action_type),
+                        "reasoning": agent_state.current_action.reasoning,
+                        "target_location": agent_state.current_action.target_location,
+                        "target_object": agent_state.current_action.target_object,
+                        "target_agent": agent_state.current_action.target_agent,
+                        "inner_thought": agent_state.current_action.inner_thought
+                    }
+                
+                # Build agent data with enhanced information
+                agent_data = {
                     "agent_id": agent_id,
                     "name": agent_state.name if hasattr(agent_state, 'name') else agent_id,
                     "location": {
                         "x": float(agent_state.location.x),
                         "y": float(agent_state.location.y)
                     },
-                    "current_action": agent_state.current_action.model_dump_json() if hasattr(agent_state, 'current_action') else None,
-                    "status": agent_state.status if hasattr(agent_state, 'status') else "active"
-                    #"state": agent_state.model_dump() if hasattr(agent_state, 'model_dump') else {}
-                })
+                    "current_action": current_action_data,
+                    "status": agent_state.status if hasattr(agent_state, 'status') else "active",
+                    "inner_thought": agent_state.current_inner_thought if hasattr(agent_state, 'current_inner_thought') else "",
+                    "is_sleeping": agent_state.is_sleeping if hasattr(agent_state, 'is_sleeping') else False,
+                    "objects_in_use": agent_state.objects_in_use if hasattr(agent_state, 'objects_in_use') else []
+                }
+                
+                # Add needs and emotions data if full agent is available
+                if full_agent:
+                    agent_data["needs"] = {
+                        "energy": float(full_agent.needs.energy),
+                        "hunger": float(full_agent.needs.hunger),
+                        "bladder": float(full_agent.needs.bladder),
+                        "hygiene": float(full_agent.needs.hygiene),
+                        "social": float(full_agent.needs.social),
+                        "fun": float(full_agent.needs.fun),
+                        "comfort": float(full_agent.needs.comfort),
+                        "fulfillment": float(full_agent.needs.fulfillment)
+                    }
+                    agent_data["emotions"] = {
+                        "primary_emotion": full_agent.emotions.primary_emotion.value,
+                        "emotion_intensity": float(full_agent.emotions.emotion_intensity),
+                        "mood_baseline": float(full_agent.emotions.mood_baseline),
+                        "stress_level": float(full_agent.emotions.stress_level)
+                    }
+                    agent_data["wellbeing"] = full_agent.needs.get_wellbeing_score()
+                
+                agents.append(agent_data)
             world_data = {
                 "type": "world_update",
                 "data": {

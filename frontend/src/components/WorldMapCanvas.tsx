@@ -1,6 +1,8 @@
 // frontend/src/components/WorldMapCanvas.tsx
 import React, { useRef, useEffect, useState, useCallback } from 'react';
 import { useWorldMap, useAgents, useSimulationStore } from '../store/simulationStore';
+import { ThoughtBubble } from './ThoughtBubble';
+import { AnimatePresence } from 'framer-motion';
 
 interface Point2D {
   x: number;
@@ -17,6 +19,16 @@ const AGENT_COLOR = '#ff0000';
 const LANDMARK_COLOR = '#00ff00';
 const GRID_COLOR = '#646464';
 const HOVER_COLOR = '#ffff00';
+const SELECTED_AGENT_COLOR = '#ffff00';
+
+// Agent status colors for visualization
+const STATUS_COLORS = {
+  sleeping: '#9d4edd',
+  moving: '#06d6a0',
+  acting: '#ffd60a',
+  waiting: '#adb5bd',
+  idle: '#6c757d'
+} as const;
 
 export const WorldMapCanvas: React.FC = () => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -31,6 +43,7 @@ export const WorldMapCanvas: React.FC = () => {
   const [hoveredTile, setHoveredTile] = useState<Point2D | null>(null);
   const [isDragging, setIsDragging] = useState(false);
   const [dragStart, setDragStart] = useState<Point2D | null>(null);
+  const [hoveredAgent, setHoveredAgent] = useState<string | null>(null);
 
   // Zoom controls
   const handleZoom = useCallback((delta: number, mouseX?: number, mouseY?: number) => {
@@ -71,7 +84,7 @@ export const WorldMapCanvas: React.FC = () => {
     const x = e.clientX - rect.left;
     const y = e.clientY - rect.top;
 
-    // Update hovered tile
+    // Update hovered tile and agent
     const tileX = Math.floor(x / tileSize + camera.x);
     const tileY = Math.floor(y / tileSize + camera.y);
     
@@ -81,6 +94,13 @@ export const WorldMapCanvas: React.FC = () => {
     } else {
       setHoveredTile(null);
     }
+
+    // Check if hovering over an agent
+    const hoveredAgentId = Object.values(agents).find(
+      agent => Math.floor(agent.location.x) === tileX && 
+               Math.floor(agent.location.y) === tileY
+    )?.agent_id || null;
+    setHoveredAgent(hoveredAgentId);
 
     // Handle dragging
     if (isDragging && dragStart) {
@@ -213,7 +233,7 @@ export const WorldMapCanvas: React.FC = () => {
       }
     });
 
-    // Draw agents
+    // Draw agents with enhanced visualization
     Object.values(agents).forEach((agent) => {
       const screenX = (agent.location.x - camera.x) * tileSize;
       const screenY = (agent.location.y - camera.y) * tileSize;
@@ -221,9 +241,20 @@ export const WorldMapCanvas: React.FC = () => {
       if (screenX >= -tileSize && screenX < canvas.width &&
           screenY >= -tileSize && screenY < canvas.height) {
         
-        // Draw agent circle
         const isSelected = selectedAgent?.agent_id === agent.agent_id;
-        ctx.fillStyle = isSelected ? '#ffff00' : AGENT_COLOR;
+        const isHovered = hoveredAgent === agent.agent_id;
+        
+        // Draw glow for selected/hovered agent
+        if (isSelected || isHovered) {
+          ctx.shadowBlur = 20;
+          ctx.shadowColor = isSelected ? '#ffff00' : '#ffffff';
+        }
+        
+        // Draw agent circle with status-based color
+        const statusColor = agent.is_sleeping ? STATUS_COLORS.sleeping :
+                           STATUS_COLORS[agent.status as keyof typeof STATUS_COLORS] || AGENT_COLOR;
+        
+        ctx.fillStyle = isSelected ? '#ffff00' : statusColor;
         ctx.beginPath();
         ctx.arc(
           screenX + tileSize / 2,
@@ -234,6 +265,9 @@ export const WorldMapCanvas: React.FC = () => {
         );
         ctx.fill();
         
+        // Reset shadow
+        ctx.shadowBlur = 0;
+        
         // Draw selection ring
         if (isSelected) {
           ctx.strokeStyle = '#ffffff';
@@ -241,7 +275,19 @@ export const WorldMapCanvas: React.FC = () => {
           ctx.stroke();
         }
         
-        // Draw agent ID
+        // Draw status indicator
+        if (agent.is_sleeping) {
+          ctx.fillStyle = '#ffffff';
+          ctx.font = '12px Arial';
+          ctx.fillText('💤', screenX + tileSize / 2 + 8, screenY + tileSize / 2 - 8);
+        } else if (agent.objects_in_use && agent.objects_in_use.length > 0) {
+          ctx.fillStyle = '#ffd60a';
+          ctx.beginPath();
+          ctx.arc(screenX + tileSize / 2 + 8, screenY + tileSize / 2 - 8, 3, 0, Math.PI * 2);
+          ctx.fill();
+        }
+        
+        // Draw agent name/initials
         if (tileSize >= 15) {
           ctx.fillStyle = '#ffffff';
           ctx.font = `${Math.floor(tileSize / 2)}px Arial`;
@@ -338,6 +384,36 @@ export const WorldMapCanvas: React.FC = () => {
         className="cursor-grab active:cursor-grabbing"
       />
       
+      {/* Thought Bubbles */}
+      <AnimatePresence>
+        {Object.values(agents).map(agent => {
+          if (!agent.inner_thought && !agent.current_action?.inner_thought) return null;
+          
+          const screenX = (agent.location.x - camera.x) * tileSize + tileSize / 2;
+          const screenY = (agent.location.y - camera.y) * tileSize;
+          
+          // Only show thought bubbles for visible agents and if zoomed in enough
+          if (screenX < 0 || screenX > (containerRef.current?.clientWidth || 0) ||
+              screenY < 0 || screenY > (containerRef.current?.clientHeight || 0) ||
+              tileSize < 20) {
+            return null;
+          }
+          
+          const thought = agent.inner_thought || agent.current_action?.inner_thought || '';
+          const emotion = agent.emotions?.primary_emotion;
+          
+          return (
+            <ThoughtBubble
+              key={`thought-${agent.agent_id}`}
+              thought={thought}
+              x={screenX}
+              y={screenY}
+              emotion={emotion}
+            />
+          );
+        })}
+      </AnimatePresence>
+      
       {/* Info overlay */}
       <div className="absolute top-4 left-4 bg-black bg-opacity-75 text-white p-3 rounded text-sm">
         <div className="font-bold mb-2">{worldMap.name}</div>
@@ -360,6 +436,27 @@ export const WorldMapCanvas: React.FC = () => {
         <div>Mouse drag - Pan</div>
         <div>Scroll/+/- - Zoom</div>
         <div>Click agent - Select</div>
+      </div>
+      
+      {/* Status Legend */}
+      <div className="absolute bottom-4 left-4 bg-black bg-opacity-75 text-white p-3 rounded text-xs">
+        <div className="font-bold mb-2">Agent Status:</div>
+        <div className="flex items-center gap-2 mb-1">
+          <div className="w-3 h-3 rounded-full" style={{ backgroundColor: STATUS_COLORS.sleeping }}></div>
+          <span>💤 Sleeping</span>
+        </div>
+        <div className="flex items-center gap-2 mb-1">
+          <div className="w-3 h-3 rounded-full" style={{ backgroundColor: STATUS_COLORS.moving }}></div>
+          <span>🚶 Moving</span>
+        </div>
+        <div className="flex items-center gap-2 mb-1">
+          <div className="w-3 h-3 rounded-full" style={{ backgroundColor: STATUS_COLORS.acting }}></div>
+          <span>⚡ Acting</span>
+        </div>
+        <div className="flex items-center gap-2">
+          <div className="w-3 h-3 rounded-full" style={{ backgroundColor: STATUS_COLORS.waiting }}></div>
+          <span>⏸️ Waiting</span>
+        </div>
       </div>
     </div>
   );

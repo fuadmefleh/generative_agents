@@ -29,8 +29,8 @@ async def simulation_loop(simulation: Simulation):
     try:
         while True:
             try:
-                # Tick the simulation
-                simulation.tick()
+                # Tick the simulation in a thread pool to avoid blocking
+                await asyncio.to_thread(simulation.tick)
                 logger.debug("Simulation tick completed")
             except Exception as e:
                 import traceback

@@ -19,13 +19,48 @@ interface WorldMap {
   tiles: Record<string, WorldMapTile>;
 }
 
+interface AgentNeeds {
+  energy: number;
+  hunger: number;
+  bladder: number;
+  hygiene: number;
+  social: number;
+  fun: number;
+  comfort: number;
+  fulfillment: number;
+}
+
+interface AgentEmotions {
+  primary_emotion: string;
+  emotion_intensity: number;
+  mood_baseline: number;
+  stress_level: number;
+}
+
+interface AgentAction {
+  action_type: string;
+  reasoning: string;
+  target_location?: string;
+  target_sub_location?: string;
+  target_object?: string;
+  target_agent?: string;
+  inner_thought?: string;
+}
+
 interface Agent {
   agent_id: string;
   name: string;
-  description: string;
-  traits: string[];
-  location: string;
+  description?: string;
+  traits?: string[];
+  location: Point2D;
   status: string;
+  current_action?: AgentAction;
+  inner_thought?: string;
+  is_sleeping?: boolean;
+  objects_in_use?: string[];
+  needs?: AgentNeeds;
+  emotions?: AgentEmotions;
+  wellbeing?: number;
   state?: any;
 }
 
@@ -53,6 +88,7 @@ interface SimulationState {
   updateAgent: (agentId: string, update: Partial<Agent>) => void;
   removeAgent: (agentId: string) => void;
   selectAgent: (agent: Agent | null) => void;
+  setWorldMap: (map: WorldMap | null) => void;
   
   setRunning: (running: boolean) => void;
   setPaused: (paused: boolean) => void;
@@ -110,7 +146,7 @@ export const useSimulationStore = create<SimulationState>()(
       selectAgent: (agent) =>
         set({ selectedAgent: agent }),
 
-      setWorldMap: (map) =>
+      setWorldMap: (map: WorldMap | null) =>
         set({ worldMap: map }),
 
       // Simulation actions

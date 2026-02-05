@@ -1,3 +1,3 @@
-id,name,background,main_location
-1,Francisco Lopez,I wake up at 8 am and go to sleep at 10pm.I eat at 9am and work at Hobb's cafe,artist's co-living space
-2,Latoya Williams,I wake up at 6 am and go to sleep at 9pm.I eat at 8am and work at Hobb's cafe,artist's co-living space
+id,name,background,main_location,job,workplace
+1,Francisco Lopez,"Francisco is a 28-year-old aspiring artist who moved to the town 2 years ago. He wakes up around 8 am and goes to sleep around 10pm. He works part-time at Hobbs Cafe as a barista to pay the bills while pursuing his art. He's creative and somewhat introverted, preferring quiet mornings for painting. He enjoys coffee, reading art magazines, and taking walks in the park for inspiration. He's friendly but sometimes gets lost in thought.",artist's co-living space,barista,Hobbs Cafe
+2,Latoya Williams,"Latoya is a 32-year-old community organizer who is very social and energetic. She wakes up early around 6 am and goes to sleep by 9pm to maintain her active lifestyle. She also works at Hobbs Cafe but dreams of opening her own community center. She's extroverted and loves meeting new people. She enjoys cooking, exercising, and organizing local events. She has a warm personality and remembers everyone's names.",artist's co-living space,organizer,Hobbs Cafe

@@ -79,13 +79,40 @@ class OllamaClient:
                     ],
                     model=self.model,
                     format=schema,  # This enforces the schema
-                    options={"temperature": temperature}
+                    options={
+                        "temperature": temperature,
+                        "num_predict": 2048  # Increased token limit for complete JSON responses
+                    }
                 )
                 
                 # Extract content string from response
                 content = response['message']['content']
 
-                print( f"Generated content on attempt {attempt + 1}: {content}" )
+                # Log empty responses
+                if not content or content.strip() == '':
+                    logger.warning(f"Empty response from LLM on attempt {attempt + 1}")
+                    if attempt == max_retries - 1:
+                        raise ValueError("LLM returned empty response after all retries")
+                    continue
+
+                logger.debug(f"Generated content on attempt {attempt + 1} ({len(content)} chars)")
+                
+                # Try to clean up common JSON issues
+                # Remove any text before the first { or [
+                content = content.strip()
+                if '{' in content:
+                    content = content[content.find('{'):]
+                if content.endswith('}'):
+                    # Find the last valid closing brace
+                    brace_count = 0
+                    for i, char in enumerate(content):
+                        if char == '{':
+                            brace_count += 1
+                        elif char == '}':
+                            brace_count -= 1
+                            if brace_count == 0:
+                                content = content[:i+1]
+                                break
                 
                 # Parse the JSON string to a Python dict
                 data = json.loads(content)

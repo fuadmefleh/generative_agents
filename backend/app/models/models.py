@@ -16,6 +16,10 @@ class Point2D(BaseModel):
     class Config:
         # make instances immutable and therefore hashable
         frozen = True
+    
+    def distance_to(self, other: 'Point2D') -> float:
+        """Calculate Euclidean distance to another Point2D."""
+        return ((self.x - other.x) ** 2 + (self.y - other.y) ** 2) ** 0.5
 
 class Plan(BaseModel):
     """Structured plan for agent actions."""
